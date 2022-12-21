@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>WebGL</title>
+	<script src="three.min.js"></script>
+	<script src="dat.gui.min.js"></script>
+	<script src="https://unpkg.com/mathjs/lib/browser/math.js"></script>
+	<script src="complex.min.js"></script>
+
+	<script type="x-shader/x-vertex" id="vertexShader">
+		uniform float time;
+
+		void main() {
+			vec3 scale = vec3(1.0, 1.0, 1.0);
+			gl_Position = projectionMatrix * modelViewMatrix * vec4(position * scale, 1.0);
+		}
+
+	</script>
+
+	<script type="x-shader/x-fragment" id="fragmentShader">
+		uniform float time;
+		uniform float width;
+		uniform float height;
+		uniform vec3 angle;
+		uniform vec3 begin;
+		uniform vec3 light;
+
+		bool isFrag2d(vec2 c, int iters) {
+		    vec2 z = vec2(0.0, 0.0);
+		    for (int i = 0; i < iters; ++i) {
+		        if (z.x * z.x + z.y * z.y > 4.0) return false;
+		        z = vec2(z.x * z.x - z.y * z.y + c.x, 2.0 * z.x * z.y + c.y);
+		    }
+		    return z.x * z.x + z.y * z.y <= 4.0;
+		}
+
+
+		vec4 mul(vec4 a, vec4 b) {
+			return vec4(a.x * b.x - a.y * b.y - a.z * b.z - a.w * b.w, 
+						a.x * b.y + a.y * b.x + a.z * b.w - a.w * b.z,
+						a.x * b.z - a.y * b.w + a.z * b.x + a.w * b.y,
+						a.x * b.w + a.y * b.z - a.z * b.y + a.w * b.x);
+		}
+
+		float len_sq(vec4 c) {
+			return c.x * c.x + c.y * c.y + c.z * c.z + c.w * c.w;
+		}
+
+
+		float isZulia4d(vec3 comp, int iters) {
+			mat3 Rx = mat3(
+		    	1.0, 0.0, 0.0,
+		    	0.0, cos(angle.x), -sin(angle.x),
+		    	0.0, sin(angle.x), cos(angle.x)
+		    ); 
+		    mat3 Ry = mat3(
+		    	cos(angle.y), 0.0, sin(angle.y),
+		    	0.0, 1.0, 0.0,
+		    	-sin(angle.y), 0.0, cos(angle.y)
+		    ); 
+		    mat3 Rz = mat3(
+		    	cos(angle.z), -sin(angle.z), 0.0,
+		    	sin(angle.z), cos(angle.z), 0.0,
+		    	0.0, 0.0, 1.0 
+		    );
+			vec4 c = vec4(comp * Rx * Ry * Rz, 0.0);
+			vec4 z = vec4(begin, 0.0); //vec3(-0.74543, 0.11301, 0.11301);
+			for (int i = 0; i < iters; i++) {
+				float len = c.x * c.x + c.y * c.y + c.z * c.z + c.w * c.w;
+				if (len > 4.0) return len;
+				c = mul(c, c) + z;
+			}
+			return c.x * c.x + c.y * c.y + c.z * c.z + c.w * c.w;
+		}
+
+		float isMondelbrot4d(vec3 comp, int iters) {
+			mat3 Rx = mat3(
+		    	1.0, 0.0, 0.0,
+		    	0.0, cos(angle.x), -sin(angle.x),
+		    	0.0, sin(angle.x), cos(angle.x)
+		    ); 
+		    mat3 Ry = mat3(
+		    	cos(angle.y), 0.0, sin(angle.y),
+		    	0.0, 1.0, 0.0,
+		    	-sin(angle.y), 0.0, cos(angle.y)
+		    ); 
+		    mat3 Rz = mat3(
+		    	cos(angle.z), -sin(angle.z), 0.0,
+		    	sin(angle.z), cos(angle.z), 0.0,
+		    	0.0, 0.0, 1.0 
+		    );
+			vec4 c = vec4(comp * Rx * Ry * Rz, 0.0);
+			vec4 z = vec4(begin, 0.0); 
+			for (int i = 0; i < iters; i++) {
+				float len = len_sq(z);
+				if (len > 4.0) return len;
+				z = mul(z, z) + c;
+			}
+			return len_sq(z);
+		}
+
+		vec3 raycast(vec2 cord) {
+			vec3 point = vec3(cord.x, cord.y, -1.0);
+		    point.x /= width;
+		    point.y /= height;
+		    point.xy -= vec2(0.5, 0.5);
+		    vec3 scale = vec3(3.0, 3.0, 1.0);
+		    point *= scale;
+
+		    while (point.z < 1.0) {
+		    	float len_sq = isZulia4d(point, 30);
+		    	if (len_sq < 4.0) {
+		    		break;
+		    	}
+		    	point.z += 0.1;
+		    }
+
+		    if (point.z >= 1.0) return point;
+		    
+		    float lhs = point.z - 0.1;
+	    	float rhs = point.z;
+	    	while (rhs - lhs > 0.00001) {
+	    		float mid = (rhs + lhs) / 2.0;
+	    		point.z = mid;
+	    		if (isZulia4d(point, 30) <= 4.0) {
+	    			rhs = mid;
+	    		} else {
+	    			lhs = mid;
+	    		}
+	    	}
+	    	point.z = rhs;
+	    	return point;
+		}
+
+
+		void main() {
+			float delta = 1.0;
+
+			vec3 p0 = raycast(vec2(gl_FragCoord.x, gl_FragCoord.y));
+			vec3 p1 = raycast(vec2(gl_FragCoord.x + delta, gl_FragCoord.y));
+			vec3 p2 = raycast(vec2(gl_FragCoord.x, gl_FragCoord.y + delta));
+
+			vec3 normal = -normalize(cross(normalize(p0 - p1), normalize(p0 - p2)));
+
+		    if (p0.z < 1.0) {
+		    	float grey = max((-dot(normal, normalize(light)) + 1.0) / 2.0, 0.001);
+		    	gl_FragColor = vec4(grey, grey, grey, 1);
+		    } else {
+		    	gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+		    }
+		}
+	</script>
+
+	<script src="script.js"></script>
+	<style type="text/css">
+		html, body {
+			margin: 0;
+			overflow: hidden;
+		}
+	</style>
+</head>
+<body>
+	<canvas id="canvas"></canvas>
+</body>
+</html>
